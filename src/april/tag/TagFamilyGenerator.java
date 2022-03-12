@@ -28,6 +28,8 @@ either expressed or implied, of the Regents of The University of Michigan.
 package april.tag;
 
 import java.io.*;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.awt.image.*;
 import java.util.concurrent.LinkedBlockingDeque;
@@ -46,16 +48,19 @@ public class TagFamilyGenerator
     ArrayList<Long> codelist;
     long starttime;
 
+    Path out_dir;
+
     long rotcodes[] = new long[16384];
     int nrotcodes = 0;
 
     static final long PRIME = 982451653;
 
-    public TagFamilyGenerator(ImageLayout layout, int minhamming)
+    public TagFamilyGenerator(ImageLayout layout, int minhamming, Path out_dir)
     {
         this.layout = layout;
         this.nbits = layout.getNumBits();
         this.minhamming = minhamming;
+        this.out_dir = out_dir;
     }
 
     static final void printBoolean(PrintStream outs, long v, int nbits)
@@ -73,6 +78,12 @@ public class TagFamilyGenerator
             System.out.printf("    %0"+((int) Math.ceil(nbits/4))+"x\n", w);
         }
     }
+
+    String getCname()
+    {
+        return String.format("Tag%s%dh%d", layout.getName(), nbits, minhamming);
+    }
+
 
     public static void main(String args[])
     {
@@ -97,10 +108,15 @@ public class TagFamilyGenerator
 
         ImageLayout layout = LayoutUtil.getLayout(args[0]);
         int minhamming = Integer.parseInt(args[1]);
+        Path out_dir = Paths.get("").toAbsolutePath();
+        if (args.length > 2)
+        {
+            out_dir = Paths.get(args[2]).toAbsolutePath();
+        }
 
-        TagFamilyGenerator tfg = new TagFamilyGenerator(layout, minhamming);
+        TagFamilyGenerator tfg = new TagFamilyGenerator(layout, minhamming, out_dir);
         tfg.compute();
-        tfg.report();
+        tfg.report(out_dir.resolve(tfg.getCname() + ".java"));
     }
 
     boolean isCodePartiallyOkay(long v, long nRotCodesPartial)
@@ -265,7 +281,8 @@ public class TagFamilyGenerator
                 // print a partial report.
                 if ((System.currentTimeMillis() - lastreporttime > 60 * 60 * 1000) ||
                         (codelist.size() > 1.1*lastNumCodes && System.currentTimeMillis() - lastreporttime > 60*1000)) {
-                    report();
+
+                    report(out_dir.resolve(getCname() + "_" + String.valueOf(codelist.size()) + ".java"));
                     lastreporttime = System.currentTimeMillis();
                     lastNumCodes = codelist.size();
                 }
@@ -433,7 +450,7 @@ public class TagFamilyGenerator
         return new TagFamily(layout, minhamming, codes);
     }
 
-    void report()
+    void report(Path out_path)
     {
         int nCodes;
         synchronized (codelist) {
@@ -469,14 +486,13 @@ public class TagFamilyGenerator
         }
 
         synchronized (System.out) {
-            System.out.printf("\n\npackage april.tag;\n\n");
-            String cname = String.format("Tag%s%dh%d", layout.getName(), nbits, minhamming);
-            System.out.printf("/** Tag family with %d distinct codes.\n", codes.length);
-            System.out.printf("    bits: %d,  minimum hamming: %d\n\n", nbits, minhamming);
+            String out_txt = "\n\npackage april.tag;\n\n";
+            out_txt += String.format("/** Tag family with %d distinct codes.\n", codes.length);
+            out_txt += String.format("    bits: %d,  minimum hamming: %d\n\n", nbits, minhamming);
 
             // compute some ROC statistics, assuming randomly-visible targets
             // as a function of how many bits we're willing to correct.
-            System.out.printf("    Max bits corrected       False positive rate\n");
+            out_txt += "    Max bits corrected       False positive rate\n";
 
             for (int cbits = 0; cbits <= (minhamming - 1) / 2; cbits++) {
                 long validCodes = 0; // how many input codes will be mapped to a single valid code?
@@ -486,56 +502,66 @@ public class TagFamilyGenerator
 
                 validCodes *= codes.length; // total number of codes
 
-                System.out.printf("          %3d             %15.8f %%\n", cbits, (100.0 * validCodes) / (1L << nbits));
+
+                out_txt += String.format("          %3d             %15.8f %%\n", cbits, (100.0 * validCodes) / (1L << nbits));
             }
 
-            System.out.printf("\n    Generation time: %f s\n\n", (System.currentTimeMillis() - starttime) / 1000.0);
+            out_txt += String.format("\n    Generation time: %f s\n\n", (System.currentTimeMillis() - starttime) / 1000.0);
+            out_txt += String.format("    Hamming distance between pairs of codes (accounting for rotation):\n\n");
 
-            System.out.printf("    Hamming distance between pairs of codes (accounting for rotation):\n\n");
             for (int i = 0; i < hds.length; i++) {
-                System.out.printf("    %4d  %d\n", i, hds[i]);
+                out_txt += String.format("    %4d  %d\n", i, hds[i]);
             }
 
-            System.out.printf("**/\n");
-
-            System.out.printf("public class %s extends TagFamily\n", cname);
-            System.out.printf("{\n");
+            out_txt += String.format("**/\n");
+            out_txt += String.format("public class %s extends TagFamily\n", getCname());
+            out_txt += String.format("{\n");
 
             int maxLength = 8192;
             int numSubMethods = (maxLength + codes.length - 1) / maxLength;
             for (int i = 0; i < numSubMethods; i++) {
-                System.out.printf("\tprivate static class ConstructCodes%d {\n", i);
-                System.out.printf("\t\tprivate static long[] constructCodes() {\n");
-                System.out.printf("\t\t\treturn new long[] { ");
+                out_txt += String.format("\tprivate static class ConstructCodes%d {\n", i);
+                out_txt += String.format("\t\tprivate static long[] constructCodes() {\n");
+                out_txt += String.format("\t\t\treturn new long[] { ");
                 int jMax = Math.min(maxLength, codes.length - i * maxLength);
                 for (int j = 0; j < jMax; j++) {
                     long w = codes[i * maxLength + j];
-                    System.out.printf("0x%0" + ((int) Math.ceil(nbits / 4)) + "xL", w);
+                    out_txt += String.format("0x%0" + ((int) Math.ceil(nbits / 4)) + "xL", w);
                     if (j == jMax - 1) {
-                        System.out.printf(" };\n\t\t}\n\t}\n\n");
+                        out_txt += String.format(" };\n\t\t}\n\t}\n\n");
                     } else {
-                        System.out.printf(", ");
+                        out_txt += String.format(", ");
                     }
                 }
             }
 
-            System.out.printf("\tprivate static long[] constructCodes() {\n");
-            System.out.printf("\t\tlong[] codes = new long[%d];\n", codes.length);
+            out_txt += String.format("\tprivate static long[] constructCodes() {\n");
+            out_txt += String.format("\t\tlong[] codes = new long[%d];\n", codes.length);
             for (int i = 0; i < numSubMethods; i++) {
-                System.out.printf("\t\tSystem.arraycopy(ConstructCodes%d.constructCodes(), 0, codes, %d, %d);\n",
+                out_txt += String.format("\t\tSystem.arraycopy(ConstructCodes%d.constructCodes(), 0, codes, %d, %d);\n",
                         i, i * maxLength, Math.min(maxLength, codes.length - i * maxLength));
             }
-            System.out.printf("\t\treturn codes;\n");
-            System.out.printf("\t}\n\n");
+            out_txt += String.format("\t\treturn codes;\n");
+            out_txt += String.format("\t}\n\n");
 
 
-            System.out.printf("\tpublic %s()\n", cname);
-            System.out.printf("\t{\n");
-            System.out.printf("\t\tsuper(ImageLayout.Factory.createFromString(\"%s\", \"%s\"), %d, constructCodes());\n",
+            out_txt += String.format("\tpublic %s()\n", getCname());
+            out_txt += String.format("\t{\n");
+            out_txt += String.format("\t\tsuper(ImageLayout.Factory.createFromString(\"%s\", \"%s\"), %d, constructCodes());\n",
                     layout.getName(), layout.getDataString(), minhamming);
-            System.out.printf("\t}\n");
-            System.out.printf("}\n");
-            System.out.printf("\n");
+            out_txt += String.format("\t}\n");
+            out_txt += String.format("}\n");
+            out_txt += String.format("\n");
+
+            System.out.printf("%s", out_txt);
+
+            try (PrintWriter out_file = new PrintWriter(out_path.toString())) {
+                out_file.print(out_txt);
+                out_file.close();
+            } catch (java.io.FileNotFoundException e) {
+                System.out.printf("Failed to open %s to save output", out_path.toString());
+            }
+
         }
     }
 
