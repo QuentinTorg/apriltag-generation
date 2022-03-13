@@ -41,14 +41,9 @@ COPY . /opt/$proj_name/source
 RUN chown $docker_build_user:$docker_build_user --recursive /opt/$proj_name/source
 USER $docker_build_user
 
-#WORKDIR /opt/$proj_name/source/
-#
-#RUN rm -r build/* && ant
+WORKDIR /opt/$proj_name/source/
 
-RUN git clone -v --progress --single-branch --branch master https://github.com/QuentinTorg/apriltag-generation.git apriltag-generation && \
-    cd apriltag-generation && \
-    ant
-WORKDIR /opt/$proj_name/source/apriltag-generation
+RUN rm -r build/* && ant
 
 ENTRYPOINT ["java", "-cp", "april.jar", "april.tag.TagFamilyGenerator"]
 CMD ["standard_6", "7", "/media/host/"]
