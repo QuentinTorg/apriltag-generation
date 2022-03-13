@@ -282,7 +282,7 @@ public class TagFamilyGenerator
                 if ((System.currentTimeMillis() - lastreporttime > 60 * 60 * 1000) ||
                         (codelist.size() > 1.1*lastNumCodes && System.currentTimeMillis() - lastreporttime > 60*1000)) {
 
-                    report(out_dir.resolve(getCname() + "_" + String.valueOf(codelist.size()) + ".java"));
+                    report(out_dir.resolve(getCname() + "_" + String.valueOf(codelist.size()) + "codes.java"));
                     lastreporttime = System.currentTimeMillis();
                     lastNumCodes = codelist.size();
                 }

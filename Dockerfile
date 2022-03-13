@@ -37,16 +37,17 @@ RUN groupadd --gid $docker_build_gid $docker_build_user && \
     mkdir -p /opt/$proj_name/{source,build} && \
     chown -R $docker_build_user:$docker_build_user /opt/$proj_name /opt/$proj_name/{source,build}
 
-#COPY . /opt/$proj_name/source
-#RUN chown $docker_build_user:$docker_build_user --recursive /opt/$proj_name/source
-
-WORKDIR /opt/$proj_name/source/
+COPY . /opt/$proj_name/source
+RUN chown $docker_build_user:$docker_build_user --recursive /opt/$proj_name/source
 USER $docker_build_user
 
-RUN git clone -v --progress  https://github.com/QuentinTorg/apriltag-generation.git apriltag-generation && \
+#WORKDIR /opt/$proj_name/source/
+#
+#RUN rm -r build/* && ant
+
+RUN git clone -v --progress --single-branch --branch master https://github.com/QuentinTorg/apriltag-generation.git apriltag-generation && \
     cd apriltag-generation && \
     ant
-
 WORKDIR /opt/$proj_name/source/apriltag-generation
 
 ENTRYPOINT ["java", "-cp", "april.jar", "april.tag.TagFamilyGenerator"]
